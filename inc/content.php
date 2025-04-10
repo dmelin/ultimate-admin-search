@@ -21,7 +21,7 @@ function ultimate_admin_search_page()
                 ?>
                     <div>
                         <input type="checkbox" value="<?= $post_type->name; ?>" id="post-types-<?= $post_type->name; ?>" name="post-types[<?= $post_type->name; ?>]" <?php checked(isset($allowed_post_types[$post_type->name]) && $allowed_post_types[$post_type->name]); ?>>
-                        <label for="post-types-<?= $post_type->name; ?>"><?= $post_type->labels->name; ?></label>
+                        <label for="post-types-<?= $post_type->name; ?>"><?= $post_type->labels->name; ?> <em><?= $post_type->name ?></em></label>
                     </div>
                 <?php
                 }

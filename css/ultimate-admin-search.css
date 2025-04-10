@@ -235,6 +235,12 @@
   padding: 5px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+}
+.ultimate-admin-search-choices > div label em {
+  font-size: smaller;
+  opacity: 0.6;
 }
 .ultimate-admin-search-choices > div input {
   display: none;
