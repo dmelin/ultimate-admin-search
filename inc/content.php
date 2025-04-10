@@ -39,7 +39,7 @@ function ultimate_admin_search_footer()
 {
 ?>
     <div id="ultimate-admin-search-modal" class="ultimate-admin-search-modal">
-        <div id="ultimate-admin-search-modal__handle"></div>
+        <button type="button" id="ultimate-admin-search-modal__handle" class="primary button-primary"></button>
         <div id="ultimate-admin-search-modal__search">
             <a href="<?= admin_url('admin.php?page=ultimate-admin-search') ?>" class="settings">
                 <span class="dashicons dashicons-admin-generic"></span>
