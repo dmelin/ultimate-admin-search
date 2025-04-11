@@ -16,14 +16,10 @@ if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly
 }
 
-require_once __DIR__ . '/inc/scripts.php';
+define('ULTIMATE_ADMIN_SEARCH_VERSION', '1.0.0');
 
 require_once __DIR__ . '/inc/ajax.php';
-
-require_once __DIR__ . '/inc/functions.php';
 
 require_once __DIR__ . '/inc/content.php';
 
 require_once __DIR__ . '/inc/cache.php';
-
-require_once __DIR__ . '/inc/menu.php';

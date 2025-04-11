@@ -1,151 +1,348 @@
 <?php
 
 /**
- * Handle the AJAX request.
+ * Ultimate Admin Search
+ * 
+ * Handles AJAX requests for the Ultimate Admin Search plugin.
+ * 
+ * @package UltimateAdminSearch
  */
-function ultimate_admin_search_get_types()
+
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Class to handle all AJAX functionality for Ultimate Admin Search
+ */
+class Ultimate_Admin_Search_Ajax
 {
-    // Check the nonce
-    check_ajax_referer('ultimate_admin_search_nonce', 'nonce');
 
-    $results = array();
+    /**
+     * Initialize hooks
+     */
+    public static function init()
+    {
+        // Admin AJAX endpoints
+        add_action('wp_ajax_ultimate_admin_search_get_types', [self::class, 'get_post_types']);
+        add_action('wp_ajax_ultimate_admin_search_get_posts', [self::class, 'get_posts']);
+        add_action('wp_ajax_ultimate_admin_search_save_settings', [self::class, 'save_settings']);
 
-    $allowed_post_types = get_option('ultimate-admin-search-allowed-post-types', true);
+        // Non-privileged users shouldn't access these endpoints, but in case hooks exist:
+        add_action('wp_ajax_nopriv_ultimate_admin_search_get_types', [self::class, 'reject_unauthorized_access']);
+        add_action('wp_ajax_nopriv_ultimate_admin_search_get_posts', [self::class, 'reject_unauthorized_access']);
+        add_action('wp_ajax_nopriv_ultimate_admin_search_save_settings', [self::class, 'reject_unauthorized_access']);
+    }
 
-    $post_types = ultimate_admin_search_get_all_post_types();
-    foreach ($post_types as $post_type) {
-        // Check if the post type is allowed
-        if ((!isset($allowed_post_types[$post_type->name]) || !$allowed_post_types[$post_type->name]) && (is_array($allowed_post_types) && count($allowed_post_types) > 0)) {
-            continue;
+    /**
+     * Handle unauthorized access
+     */
+    public static function reject_unauthorized_access()
+    {
+        wp_send_json_error('Unauthorized access', 403);
+        exit;
+    }
+
+    /**
+     * Get available post types for searching
+     */
+    public static function get_post_types()
+    {
+        // Verify nonce
+        if (!self::verify_nonce('ultimate_admin_search_nonce')) {
+            return;
         }
 
-        $results[] = array(
-            'id' => $post_type->name,
-            'title' => $post_type->labels->name,
-            'icon' => $post_type->menu_icon,
-        );
+        $results = [];
+        $allowed_post_types = self::get_allowed_post_types();
+        $post_types = self::get_all_post_types();
+
+        foreach ($post_types as $post_type) {
+            // Skip if this post type is not allowed
+            if (!self::is_post_type_allowed($post_type->name, $allowed_post_types)) {
+                continue;
+            }
+
+            $results[] = [
+                'id'    => $post_type->name,
+                'title' => $post_type->labels->name,
+                'icon'  => $post_type->menu_icon,
+            ];
+        }
+
+        wp_send_json_success($results);
     }
 
-    // Return the results
-    wp_send_json_success($results);
-}
-add_action('wp_ajax_ultimate_admin_search_get_types', 'ultimate_admin_search_get_types');
-add_action('wp_ajax_nopriv_ultimate_admin_get_types', 'ultimate_admin_search_get_types');
+    /**
+     * Get posts for search results
+     */
+    public static function get_posts()
+    {
+        // Verify nonce
+        if (!self::verify_nonce('ultimate_admin_search_nonce')) {
+            return;
+        }
 
-function ultimate_admin_search_get_posts()
-{
-    // Check the nonce
-    check_ajax_referer('ultimate_admin_search_nonce', 'nonce');
+        $post_type = isset($_POST['post_type']) ? sanitize_text_field($_POST['post_type']) : '';
+        $search_term = isset($_POST['query']) ? sanitize_text_field($_POST['query']) : '';
 
-    $post_type = isset($_POST['post_type']) ? sanitize_text_field($_POST['post_type']) : '';
-    $search_term = isset($_POST['query']) ? sanitize_text_field($_POST['query']) : '';
+        // Validate the post type
+        if (empty($post_type) || !post_type_exists($post_type)) {
+            wp_send_json_error('Invalid post type');
+            return;
+        }
 
-    // Check if we have a search cache
-    $posts = get_transient('ultimate_admin_search_posts_cache_' . $post_type);
+        // Get posts from cache or database
+        $posts = self::get_cached_posts($post_type);
+        $results = [];
 
-    if (!$posts) {
-        $args = array(
-            'post_type' => $post_type,
-            'posts_per_page' => -1,
-            'post_status' => 'any',
-            // Order by date desc
-            'orderby' => 'date',
-            'order' => 'DESC',
-        );
+        // Skip searching if search term is empty
+        if (empty($search_term)) {
+            wp_send_json_success($results);
+            return;
+        }
 
-        $posts = get_posts($args);
+        // Process each post for matches
+        foreach ($posts as $post) {
+            $matches = self::find_matches_in_post($post, $search_term);
 
-        // Cache the posts for 12 hours
-        set_transient('ultimate_admin_search_posts_cache_' . $post_type, $posts, 12 * HOUR_IN_SECONDS);
-    } else {
-        error_log('Cache hit for post type: ' . $post_type);
+            // If there are matches, add this post to results
+            if (!empty($matches)) {
+                $results[] = [
+                    'id'      => $post->ID,
+                    'title'   => get_the_title($post->ID),
+                    'url'     => get_edit_post_link($post->ID),
+                    'matched' => $matches,
+                ];
+            }
+        }
+
+        wp_send_json_success($results);
     }
 
-    $results = array();
-    foreach ($posts as $post) {
-        $matches = array();
-        $search_areas = array(
-            'title' => strip_tags($post->post_title),
+    /**
+     * Save plugin settings
+     */
+    public static function save_settings()
+    {
+        // Verify nonce
+        if (!self::verify_nonce('ultimate_admin_search_nonce')) {
+            return;
+        }
+
+        // Validate and sanitize post types
+        $allowed_post_types = [];
+
+        if (isset($_POST['post-types']) && is_array($_POST['post-types'])) {
+            foreach ($_POST['post-types'] as $post_type => $enabled) {
+                $post_type = sanitize_key($post_type);
+                if (post_type_exists($post_type)) {
+                    $allowed_post_types[$post_type] = (bool) $enabled;
+                }
+            }
+        }
+
+        // Clear post cache when settings change
+        self::clear_post_caches();
+
+        // Update option
+        update_option('ultimate-admin-search-allowed-post-types', $allowed_post_types);
+
+        wp_send_json_success($allowed_post_types);
+    }
+
+    /**
+     * Get all registered post types
+     * 
+     * @return array Array of post type objects
+     */
+    private static function get_all_post_types()
+    {
+        return get_post_types([], 'objects');
+    }
+
+    /**
+     * Get allowed post types from options
+     * 
+     * @return array Allowed post types
+     */
+    private static function get_allowed_post_types()
+    {
+        return get_option('ultimate-admin-search-allowed-post-types', []);
+    }
+
+    /**
+     * Check if a post type is allowed
+     * 
+     * @param string $post_type_name The post type name
+     * @param array $allowed_post_types Array of allowed post types
+     * @return bool Whether post type is allowed
+     */
+    private static function is_post_type_allowed($post_type_name, $allowed_post_types)
+    {
+        // If no post types specifically enabled, all are allowed
+        if (empty($allowed_post_types)) {
+            return true;
+        }
+
+        return isset($allowed_post_types[$post_type_name]) && $allowed_post_types[$post_type_name];
+    }
+
+    /**
+     * Get posts from cache or fetch from database
+     * 
+     * @param string $post_type Post type to fetch
+     * @return array Array of post objects
+     */
+    private static function get_cached_posts($post_type)
+    {
+        $cache_key = 'ultimate_admin_search_posts_cache_' . sanitize_key($post_type);
+        $posts = get_transient($cache_key);
+
+        if (false === $posts) {
+            $args = [
+                'post_type'      => $post_type,
+                'posts_per_page' => -1,
+                'post_status'    => 'any',
+                'orderby'        => 'date',
+                'order'          => 'DESC',
+            ];
+
+            $posts = get_posts($args);
+
+            // Cache the posts for 12 hours
+            set_transient($cache_key, $posts, 12 * HOUR_IN_SECONDS);
+        }
+
+        return $posts;
+    }
+
+    /**
+     * Clear all post caches
+     */
+    private static function clear_post_caches()
+    {
+        global $wpdb;
+
+        $cache_keys = $wpdb->get_col(
+            "SELECT `option_name` 
+            FROM {$wpdb->options} 
+            WHERE `option_name` LIKE '_transient_ultimate_admin_search_posts_cache_%'"
+        );
+
+        foreach ($cache_keys as $key) {
+            $transient_name = str_replace('_transient_', '', $key);
+            delete_transient($transient_name);
+        }
+    }
+
+    /**
+     * Find search term matches in a post
+     * 
+     * @param WP_Post $post The post object
+     * @param string $search_term The search term
+     * @return array Array of matches
+     */
+    private static function find_matches_in_post($post, $search_term)
+    {
+        $matches = [];
+
+        // Search in post fields
+        $search_areas = [
+            'title'   => strip_tags($post->post_title),
             'content' => strip_tags($post->post_content),
             'excerpt' => strip_tags($post->post_excerpt),
-            'slug' => strip_tags($post->post_name),
-        );
+            'slug'    => strip_tags($post->post_name),
+        ];
+
         foreach ($search_areas as $key => $value) {
-            $str_pos = stripos($value, $search_term);
-            if ($str_pos !== false) {
-                $start = max(0, $str_pos - 20);
-                $end = min(strlen($value), $str_pos + strlen($search_term) + 20);
-                $value = substr($value, $start, $end - $start);
-
-                $matches[] = array(
-                    'type' => $key,
-                    'value' => $value,
-                );
+            $match = self::find_match_in_text($value, $search_term);
+            if ($match) {
+                $matches[] = [
+                    'type'  => $key,
+                    'value' => $match,
+                ];
             }
         }
 
-        $post_meta = get_post_meta($post->ID);
-        $meta_matched = false;
-        foreach ($post_meta as $meta_key => $meta_value) {
-            if (is_array($meta_value)) {
-                foreach ($meta_value as $value) {
-                    $str_pos = stripos($value, $search_term);
-                    if ($str_pos !== false) {
-                        $start = max(0, $str_pos - 20);
-                        $end = min(strlen($value), $str_pos + strlen($search_term) + 20);
-                        $value = substr($value, $start, $end - $start);
-
-                        $matches[] = array(
-                            'type' => 'meta',
-                            'key' => $meta_key,
-                            'value' => $value,
-                        );
-                        $meta_matched = true;
-                    }
-                }
-            } else {
-                $str_pos = stripos($meta_value, $search_term);
-                if ($str_pos !== false) {
-                    $start = max(0, $str_pos - 20);
-                    $end = min(strlen($meta_value), $str_pos + strlen($search_term) + 20);
-                    $value = substr($meta_value, $start, $end - $start);
-
-                    $matches[] = array(
-                        'type' => 'meta',
-                        'key' => $meta_key,
-                        'value' => $value,
-                    );
-                    $meta_matched = true;
-                }
-            }
-
-            if ($meta_matched) break;
+        // Search in post meta
+        $meta_match = self::find_matches_in_post_meta($post->ID, $search_term);
+        if ($meta_match) {
+            $matches[] = $meta_match;
         }
 
-        if (count($matches)) $results[] = array(
-            'id' => $post->ID,
-            'title' => get_the_title($post->ID),
-            'url' => get_edit_post_link($post->ID),
-            'matched' => $matches,
-        );
+        return $matches;
     }
 
-    wp_send_json_success($results);
+    /**
+     * Find a search term in text and return context
+     * 
+     * @param string $text The text to search in
+     * @param string $search_term The search term
+     * @return string|false The match with context or false if not found
+     */
+    private static function find_match_in_text($text, $search_term)
+    {
+        $str_pos = stripos($text, $search_term);
+
+        if ($str_pos !== false) {
+            $start = max(0, $str_pos - 20);
+            $end = min(strlen($text), $str_pos + strlen($search_term) + 20);
+            return substr($text, $start, $end - $start);
+        }
+
+        return false;
+    }
+
+    /**
+     * Find matches in post metadata
+     * 
+     * @param int $post_id The post ID
+     * @param string $search_term The search term
+     * @return array|false Match data or false if not found
+     */
+    private static function find_matches_in_post_meta($post_id, $search_term)
+    {
+        $post_meta = get_post_meta($post_id);
+
+        foreach ($post_meta as $meta_key => $meta_values) {
+            if (is_array($meta_values)) {
+                foreach ($meta_values as $value) {
+                    if (is_serialized($value)) {
+                        continue; // Skip serialized data
+                    }
+
+                    $match = self::find_match_in_text($value, $search_term);
+                    if ($match) {
+                        return [
+                            'type'  => 'meta',
+                            'key'   => $meta_key,
+                            'value' => $match,
+                        ];
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Verify nonce for AJAX requests
+     * 
+     * @param string $nonce_name Name of the nonce
+     * @return bool Whether nonce is valid
+     */
+    private static function verify_nonce($nonce_name)
+    {
+        if (!check_ajax_referer($nonce_name, 'ultimate-admin-search-nonce', false)) {
+            wp_send_json_error('Invalid nonce mate', 403);
+            return false;
+        }
+        return true;
+    }
 }
-add_action('wp_ajax_ultimate_admin_search_get_posts', 'ultimate_admin_search_get_posts');
-add_action('wp_ajax_nopriv_ultimate_admin_search_get_posts', 'ultimate_admin_search_get_posts');
 
-function ultimate_admin_search_save_settings()
-{
-    // Check the nonce
-    check_ajax_referer('ultimate_admin_search_nonce', 'nonce');
-
-    $allowed_post_types = isset($_POST['post-types']) ? $_POST['post-types'] : array();
-
-    // Save the allowed post types in the database
-    update_option('ultimate-admin-search-allowed-post-types', $allowed_post_types);
-
-    wp_send_json_success($allowed_post_types);
-}
-add_action('wp_ajax_ultimate_admin_search_save_settings', 'ultimate_admin_search_save_settings');
-add_action('wp_ajax_nopriv_ultimate_admin_search_save_settings', 'ultimate_admin_search_save_settings');
+// Initialize hooks
+Ultimate_Admin_Search_Ajax::init();
