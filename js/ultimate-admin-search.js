@@ -207,11 +207,7 @@
 			$.ajax({
 				url: ultimateAdminSearch.ajax_url,
 				type: "POST",
-				data: {
-					action: "ultimate_admin_search_get_types",
-					nonce: ultimateAdminSearch.nonce,
-					query: searchQuery,
-				},
+				data: this.elements.modal.find("form").serializeArray(),
 				success: (response) => {
 					this.elements.results.empty();
 
@@ -283,7 +279,7 @@
 					action: "ultimate_admin_search_get_posts",
 					post_type: postType,
 					query: this.elements.search.val(),
-					nonce: ultimateAdminSearch.nonce,
+					"ultimate-admin-search-nonce": ultimateAdminSearch.nonce,
 				},
 				success: (response) => {
 					target.removeClass("searching").addClass("done");
@@ -356,8 +352,8 @@
 
 							const pos = $(this).offset();
 							tooltip.css({
-								top: pos.top + $(this).outerHeight(),
-								left: pos.left,
+								top: pos.top + $(this).outerHeight() / 2,
+								left: pos.left + $(this).outerWidth(),
 							});
 
 							$(this).data("tooltip", tooltip);

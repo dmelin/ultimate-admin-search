@@ -289,7 +289,15 @@ class Ultimate_Admin_Search_Ajax
         if ($str_pos !== false) {
             $start = max(0, $str_pos - 20);
             $end = min(strlen($text), $str_pos + strlen($search_term) + 20);
-            return substr($text, $start, $end - $start);
+            $snippet = substr($text, $start, $end - $start);
+
+            // Extract the matched string from the snippet
+            $matched_string = substr($text, $str_pos, strlen($search_term));
+
+            // Encapsulate the matched string in <strong> tags
+            $highlighted_snippet = str_ireplace($matched_string, "<strong>$matched_string</strong>", $snippet);
+
+            return $highlighted_snippet;
         }
 
         return false;

@@ -302,3 +302,19 @@
 		}
 	}
 }
+
+.match-tooltip {
+	position: fixed;
+	padding: 5px;
+	background: #fff;
+	z-index: 9999999;
+	border-radius: 4px;
+	
+	transform: translateY(-50%) translateX(15px);
+
+	strong {
+		background: #eee;
+		padding: 2px 5px;
+		border-radius: 3px;
+	}
+}

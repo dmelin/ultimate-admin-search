@@ -144,7 +144,10 @@ class Ultimate_Admin_Search_UI
             <button type="button" id="ultimate-admin-search-modal__handle" class="primary button-primary">
             </button>
 
-            <div id="ultimate-admin-search-modal__search">
+            <form id="ultimate-admin-search-modal__search">
+                <?php wp_nonce_field('ultimate_admin_search_nonce', 'ultimate-admin-search-nonce'); ?>
+                <input type="hidden" name="action" value="ultimate_admin_search_get_types">
+
                 <a href="<?php echo esc_url(admin_url('admin.php?page=ultimate-admin-search')); ?>"
                     class="settings" title="<?php esc_attr_e('Settings', 'ultimate-admin-search'); ?>">
                     <span class="dashicons dashicons-admin-generic"></span>
@@ -152,6 +155,7 @@ class Ultimate_Admin_Search_UI
 
                 <input type="text"
                     id="ultimate-admin-search-input"
+                    name="query"
                     placeholder="<?php esc_attr_e('Type to search...', 'ultimate-admin-search'); ?>"
                     aria-label="<?php esc_attr_e('Search content', 'ultimate-admin-search'); ?>">
 
@@ -160,7 +164,7 @@ class Ultimate_Admin_Search_UI
                     type="button">
                     <span class="dashicons dashicons-search"></span>
                 </button>
-            </div>
+            </form>
 
             <div id="ultimate-admin-search-modal__results"></div>
 
